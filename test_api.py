@@ -10,7 +10,7 @@ import json
 # Server configuration
 BASE_URL = "http://localhost:8000"
 # Replace with your actual API key generated from /admin/api-keys
-API_KEY = "YOUR_API_KEY_HERE"
+API_KEY = "nTJIxqVrt5-oom8P_EQ-loHgJVCP4Ol_TA6hMpWvjGc"
 
 # Headers for authenticated requests
 HEADERS = {
