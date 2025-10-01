@@ -2,22 +2,42 @@
   "build-1001": {
     "version": "1.1.0",
     "filename": "ota-1.1.0.zip",
-    "release_date": "2025-09-01"
+    "release_date": "2025-09-01",
+    "timestamp": "2025-09-29T15:50:53.836912",
+    "package_url": "/packages/ota-build-1001.zip",
+    "checksum": "a487654c7bb3c984177a863bd5ba6f35fa1eb7f1b56155fa593333f8c78c2ad0",
+    "patch_notes": "Update to version 1.1.0"
   },
   "build-1002": {
     "version": "1.2.0",
     "filename": "ota-1.2.0.zip",
-    "release_date": "2025-09-15"
+    "release_date": "2025-09-15",
+    "timestamp": "2025-09-29T15:50:43.607820",
+    "package_url": "/packages/ota-build-1002.zip",
+    "checksum": "76301a8cc6e96787efa14221f833029b711c437dbb7873d6385ce73735655296",
+    "patch_notes": "Update to version 1.2.0"
   },
   "build-1003": {
     "version": "1.3.0",
     "filename": "ota-1.3.0.zip",
-    "release_date": "2025-09-29"
+    "release_date": "2025-09-29",
+    "timestamp": "2025-09-29T15:34:10.654717",
+    "package_url": "/packages/ota-build-1003.zip",
+    "checksum": "2558a34d4d20964ca1d272ab26ccce9511d880579593cd4c9e01ab91ed00f325",
+    "patch_notes": "Update to version 1.3.0"
   },
   "build-test": {
-    "version": "1.3.1"
+    "version": "1.3.1",
+    "timestamp": "2025-09-29T16:54:01.316278",
+    "package_url": "/packages/ota-build-test.zip",
+    "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "patch_notes": "Update to version 1.3.1"
   },
   "build-test-2": {
-    "version": "1.3.2"
+    "version": "1.3.2",
+    "timestamp": "2025-09-29T16:58:32.478651",
+    "package_url": "/packages/ota-build-test-2.zip",
+    "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "patch_notes": "Update to version 1.3.2"
   }
 }

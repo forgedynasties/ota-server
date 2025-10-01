@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Keys Admin - OTA Server</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: #667eea;
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        
+        .nav {
+            background: #5a6fd8;
+            padding: 10px 0;
+            text-align: center;
+        }
+        
+        .nav a {
+            color: white;
+            text-decoration: none;
+            margin: 0 20px;
+            padding: 10px 20px;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        
+        .nav a:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .section {
+            margin-bottom: 30px;
+        }
+        
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+        
+        .table-container {
+            overflow-x: auto;
+            margin-bottom: 30px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.9em;
+            letter-spacing: 0.5px;
+        }
+        
+        tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .form-container {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 15px;
+            border: 2px solid #e9ecef;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+        
+        .form-group input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn:hover {
+            background: #5a6fd8;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .message {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .api-key-display {
+            font-family: 'Courier New', monospace;
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 10px;
+            border-radius: 5px;
+            word-break: break-all;
+            font-size: 0.9em;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+        
+        .warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .warning strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔐 API Keys Management</h1>
+            <p>Manage API keys for OTA server access</p>
+        </div>
+        
+        <div class="nav">
+            <a href="/admin/metadata">📦 Firmware Management</a>
+            <a href="/admin/api-keys">🔑 API Keys</a>
+        </div>
+        
+        <div class="content">
+            {% if message %}
+            <div class="message success">
+                {{ message }}
+            </div>
+            {% endif %}
+            
+            <div class="warning">
+                <strong>⚠️ Security Notice:</strong>
+                API keys provide full access to the OTA server. Store them securely and never share them in public repositories or logs.
+            </div>
+            
+            <div class="section">
+                <h2>🔑 Current API Keys</h2>
+                {% if api_keys %}
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Key Name</th>
+                                <th>API Key</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for key_name, api_key in api_keys.items() %}
+                            <tr>
+                                <td><strong>{{ key_name }}</strong></td>
+                                <td>
+                                    <div class="api-key-display">{{ api_key }}</div>
+                                </td>
+                                <td>
+                                    <form method="post" action="/admin/api-keys/delete" style="display: inline;">
+                                        <input type="hidden" name="key_name" value="{{ key_name }}">
+                                        <button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure you want to delete this API key? This cannot be undone.')">
+                                            🗑️ Delete
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <div style="font-size: 4em; margin-bottom: 20px;">🔑</div>
+                    <h3>No API Keys</h3>
+                    <p>Generate your first API key below to start using the OTA API.</p>
+                </div>
+                {% endif %}
+            </div>
+            
+            <div class="section">
+                <h2>➕ Generate New API Key</h2>
+                <div class="form-container">
+                    <form method="post" action="/admin/api-keys/generate">
+                        <div class="form-group">
+                            <label for="key_name">🏷️ Key Name</label>
+                            <input type="text" id="key_name" name="key_name" placeholder="e.g., production-device, test-client" required>
+                            <small style="color: #666; font-size: 0.9em;">Choose a descriptive name to identify this API key</small>
+                        </div>
+                        
+                        <div style="text-align: center; margin-top: 20px;">
+                            <button type="submit" class="btn">🔐 Generate API Key</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>📖 How to Use API Keys</h2>
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; border-left: 5px solid #667eea;">
+                    <h4>Include the API key in your requests:</h4>
+                    <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; margin: 10px 0; overflow-x: auto;"><code># Using curl
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"build_id": "build-1001"}' \
+     http://localhost:8000/api/check-update
+
+# Using Python requests  
+headers = {"Authorization": "Bearer YOUR_API_KEY"}
+response = requests.post("http://localhost:8000/api/check-update", 
+                        json={"build_id": "build-1001"}, 
+                        headers=headers)</code></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

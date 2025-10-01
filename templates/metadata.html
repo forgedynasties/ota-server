@@ -9,8 +9,11 @@
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-        }
-        
+        }                <div class="empty-state">
+                    <div style="font-size: 4em; margin-bottom: 20px;">📦</div>
+                    <h3>No Firmware Entries Yet</h3>
+                    <p>Add your first firmware entry below to get started.</p>
+                </div>     
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #f5f7fa;
@@ -169,7 +172,8 @@
         
         .form-group input[type="text"],
         .form-group input[type="date"],
-        .form-group input[type="file"] {
+        .form-group input[type="file"],
+        .form-group textarea {
             padding: 12px 15px;
             border: 2px solid #e0e0e0;
             border-radius: 8px;
@@ -183,7 +187,8 @@
             cursor: pointer;
         }
         
-        .form-group input:focus {
+        .form-group input:focus,
+        .form-group textarea:focus {
             outline: none;
             border-color: #667eea;
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
@@ -246,8 +251,13 @@
 <body>
     <div class="container" data-existing-builds="{{ metadata.keys() | list | join(',') }}">
         <div class="header">
-            <h1>🚀 OTA Metadata Management</h1>
+            <h1>OTA Metadata Management</h1>
             <p>Manage firmware updates with release date sequencing</p>
+        </div>
+        
+        <div style="background: #5a6fd8; padding: 10px 0; text-align: center;">
+            <a href="/admin/metadata" style="color: white; text-decoration: none; margin: 0 20px; padding: 10px 20px; border-radius: 5px; background-color: rgba(255, 255, 255, 0.2);">Firmware Management</a>
+            <a href="/admin/api-keys" style="color: white; text-decoration: none; margin: 0 20px; padding: 10px 20px; border-radius: 5px; transition: background-color 0.3s;" onmouseover="this.style.backgroundColor='rgba(255,255,255,0.2)'" onmouseout="this.style.backgroundColor='transparent'">API Keys</a>
         </div>
         
         <div class="content">
@@ -260,7 +270,7 @@
             {% endif %}
             
             <div class="section">
-                <h2>📦 Current Firmware Entries</h2>
+                <h2>Current Firmware Entries</h2>
                 {% if metadata %}
                 <div class="table-container">
                     <table>
@@ -268,8 +278,10 @@
                             <tr>
                                 <th>Build ID</th>
                                 <th>Version</th>
-                                <th>Created</th>
-                                <th>Filename</th>
+                                <th>Timestamp</th>
+                                <th>Download URL</th>
+                                <th>Checksum</th>
+                                <th>Patch Notes</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -278,13 +290,21 @@
                             <tr>
                                 <td><strong>{{ build_id }}</strong></td>
                                 <td><span class="badge">{{ entry.version }}</span></td>
-                                <td>{{ entry.creation_time }}</td>
-                                <td><code>{{ entry.filename }}</code></td>
+                                <td>{{ entry.timestamp or entry.creation_time }}</td>
+                                <td>
+                                    <a href="{{ entry.package_url or '/packages/ota-' + build_id + '.zip' }}" style="color: #667eea; text-decoration: none;" title="Download package">
+                                        {{ entry.package_url or '/packages/ota-' + build_id + '.zip' }}
+                                    </a>
+                                </td>
+                                <td><code style="font-size: 0.8em;">{{ entry.checksum[:8] if entry.checksum else 'N/A' }}...</code></td>
+                                <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ entry.patch_notes or 'No notes' }}">
+                                    {{ entry.patch_notes or 'No notes' }}
+                                </td>
                                 <td>
                                     <form method="post" action="/admin/metadata/delete" style="display: inline;">
                                         <input type="hidden" name="build_id" value="{{ build_id }}">
                                         <button type="submit" class="delete-btn" onclick="return confirm('Are you sure you want to delete this entry?')">
-                                            🗑️ Delete
+                                            Delete
                                         </button>
                                     </form>
                                 </td>
@@ -303,21 +323,26 @@
             </div>
 
             <div class="section">
-                <h2>➕ Add New Firmware Entry</h2>
+                <h2>Add New Firmware Entry</h2>
                 <div class="form-container">
                     <form method="post" action="/admin/metadata/add" enctype="multipart/form-data">
                         <div class="form-grid">
                             <div class="form-group">
-                                <label for="build_id">🏗️ Build ID</label>
+                                <label for="build_id">Build ID</label>
                                 <input type="text" id="build_id" name="build_id" placeholder="e.g., build-1004" required>
                                 <small style="color: #666; font-size: 0.9em;">File will be saved as: ota-{build_id}.zip</small>
                             </div>
                             <div class="form-group">
-                                <label for="version">🔢 Version</label>
+                                <label for="version">Version</label>
                                 <input type="text" id="version" name="version" placeholder="e.g., 1.4.0" required>
                             </div>
                             <div class="form-group" style="grid-column: 1 / -1;">
-                                <label for="upload_file">📁 Upload Package File</label>
+                                <label for="patch_notes">Patch Notes</label>
+                                <textarea id="patch_notes" name="patch_notes" rows="3" placeholder="Enter release notes or changes in this update..."></textarea>
+                                <small style="color: #666; font-size: 0.9em;">Describe what's new or changed in this version</small>
+                            </div>
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <label for="upload_file">Upload Package File</label>
                                 <input type="file" id="upload_file" name="upload_file" accept=".zip" onchange="handleFileUpload()">
                                 <small style="color: #666; font-size: 0.9em;">Select a .zip file to upload (will be renamed to ota-{build_id}.zip)</small>
                             </div>
@@ -332,7 +357,7 @@
                         </div>
                         
                         <div style="text-align: center; margin-top: 20px;">
-                            <button type="submit" class="add-btn">✨ Add Firmware Entry</button>
+                            <button type="submit" class="add-btn">Add Firmware Entry</button>
                         </div>
                     </form>
                 </div>
