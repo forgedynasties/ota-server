@@ -156,16 +156,16 @@ get_metadata() {
 
 # Function to test checksum endpoint
 test_checksum_endpoint() {
-    local filename="$1"
-    print_step "Testing checksum endpoint for $filename"
+    local build_id="$1"
+    print_step "Testing checksum endpoint for $build_id"
     
-    local response=$(curl -s "$SERVER_URL/checksum/$filename")
+    local response=$(curl -s "$SERVER_URL/checksum/$build_id")
     echo -e "${YELLOW}Checksum Response:${NC} $response"
     
     # Parse and display checksum info
     if echo "$response" | grep -q '"checksum"'; then
         local checksum=$(echo "$response" | grep -o '"checksum":"[^"]*"' | cut -d'"' -f4)
-        print_info "File checksum: ${checksum:0:32}..."
+        print_info "Build checksum: ${checksum:0:32}..."
         print_success "Checksum endpoint working correctly"
     else
         print_error "Checksum endpoint returned unexpected response"
@@ -226,17 +226,17 @@ done
 print_section "🔧 ADDITIONAL ENDPOINT TESTS"
 
 # Test checksum endpoint
-test_checksum_endpoint "ota-1.1.0.zip"
+test_checksum_endpoint "build-1001"
 
 # Test direct package download
 print_step "Testing direct package download..."
-download_response=$(curl -s -w "%{http_code}" "$SERVER_URL/packages/ota-1.1.0.zip" -o /dev/null)
+download_response=$(curl -s -w "%{http_code}" "$SERVER_URL/packages/ota-build-1001.zip" -o /dev/null)
 if [ "$download_response" = "200" ]; then
     print_success "Package download endpoint is working (HTTP 200)"
     
     # Check file size
     print_step "Checking package file details..."
-    size_response=$(curl -s -I "$SERVER_URL/packages/ota-1.1.0.zip" | grep -i content-length | cut -d' ' -f2 | tr -d '\r')
+    size_response=$(curl -s -I "$SERVER_URL/packages/ota-build-1001.zip" | grep -i content-length | cut -d' ' -f2 | tr -d '\r')
     if [ -n "$size_response" ]; then
         print_info "Package size: $size_response bytes"
         if [ "$size_response" -gt 0 ]; then
