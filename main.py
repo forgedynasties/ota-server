@@ -276,10 +276,28 @@ def sign_data(data: bytes) -> str:
     )
     return signature.hex()
 
+def find_package_file(build_id: str) -> Path:
+    """Find the actual package file for a build ID"""
+    # Try different naming patterns
+    patterns = [
+        f"ota-{build_id}.zip",
+        f"ota-build-{build_id}.zip", 
+        f"{build_id}.zip"
+    ]
+    
+    for pattern in patterns:
+        file_path = PACKAGES_DIR / pattern
+        if file_path.exists():
+            return file_path
+    
+    return None
+
 def calculate_checksum(build_id: str) -> str:
-    """Calculate SHA256 checksum for a package file using standardized naming."""
-    filename = f"ota-{build_id}.zip"
-    file_path = PACKAGES_DIR / filename
+    """Calculate SHA256 checksum for a package file."""
+    file_path = find_package_file(build_id)
+    if not file_path:
+        raise FileNotFoundError(f"Package file not found for build {build_id}")
+    
     sha256 = hashlib.sha256()
     with open(file_path, "rb") as f:
         for chunk in iter(lambda: f.read(4096), b""):
@@ -287,10 +305,9 @@ def calculate_checksum(build_id: str) -> str:
     return sha256.hexdigest()
 
 def get_file_creation_time(build_id: str) -> str:
-    """Get formatted creation time for a package file using standardized naming."""
-    filename = f"ota-{build_id}.zip"
-    file_path = PACKAGES_DIR / filename
-    if not file_path.exists():
+    """Get formatted creation time for a package file."""
+    file_path = find_package_file(build_id)
+    if not file_path:
         return "File not found"
     
     try:
@@ -301,10 +318,9 @@ def get_file_creation_time(build_id: str) -> str:
 
 def get_build_info(build_id: str, metadata_entry: Dict[str, Any]) -> Build:
     """Convert metadata entry to Build object with OTA package info."""
-    package_filename = f"ota-{build_id}.zip"
-    package_file = PACKAGES_DIR / package_filename
+    package_file = find_package_file(build_id)
     
-    if package_file.exists():
+    if package_file:
         # Use stored metadata or calculate checksum if not available
         checksum = metadata_entry.get("checksum")
         if not checksum:
@@ -315,7 +331,7 @@ def get_build_info(build_id: str, metadata_entry: Dict[str, Any]) -> Build:
         if not timestamp:
             timestamp = get_file_creation_time(build_id)
             
-        package_url = metadata_entry.get("package_url", f"/packages/{package_filename}")
+        package_url = metadata_entry.get("package_url", f"/packages/{package_file.name}")
         patch_notes = metadata_entry.get("patch_notes", f"Update to version {metadata_entry.get('version', 'unknown')}")
         
         ota_package = OTAPackage(
@@ -703,26 +719,28 @@ async def add_metadata(
         if not file_path.exists():
             raise HTTPException(status_code=400, detail=f"No file uploaded and {standard_filename} does not exist in packages directory")
     
-    # Calculate checksum and timestamp for the package
-    try:
-        checksum = calculate_checksum(build_id)
-        timestamp = datetime.now().isoformat()
-        package_url = f"/packages/{standard_filename}"
-        
-        # Add or update build in database
-        existing_build = get_build_from_db(build_id)
-        action = "updated" if existing_build else "added"
-        
-        create_build_in_db(
-            build_id=build_id,
-            version=version,
-            timestamp=timestamp,
-            package_url=package_url,
-            checksum=checksum,
-            patch_notes=patch_notes or f"Update to version {version}"
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process package: {str(e)}")
+        # Calculate checksum and timestamp for the package
+        try:
+            checksum = calculate_checksum(build_id)
+            timestamp = datetime.now().isoformat()
+            # Use actual filename that was uploaded
+            actual_file = find_package_file(build_id)
+            package_url = f"/packages/{actual_file.name if actual_file else standard_filename}"
+            
+            # Add or update build in database
+            existing_build = get_build_from_db(build_id)
+            action = "updated" if existing_build else "added"
+            
+            create_build_in_db(
+                build_id=build_id,
+                version=version,
+                timestamp=timestamp,
+                package_url=package_url,
+                checksum=checksum,
+                patch_notes=patch_notes or f"Update to version {version}"
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to process package: {str(e)}")
     
     # Redirect with success message
     return RedirectResponse(url=f"/admin/metadata?message=Build {build_id} {action} successfully", status_code=303)

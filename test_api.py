@@ -28,7 +28,7 @@ def test_authentication():
         print("2. Go to http://localhost:8000/admin/api-keys")
         print("3. Generate an API key and update the API_KEY variable in this script")
         return False
-    
+
     # Test with valid API key
     test_data = {"build_id": "build-1001"}
     try:
