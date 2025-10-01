@@ -219,13 +219,13 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔐 API Keys Management</h1>
+            <h1>API Keys Management</h1>
             <p>Manage API keys for OTA server access</p>
         </div>
         
         <div class="nav">
-            <a href="/admin/metadata">📦 Firmware Management</a>
-            <a href="/admin/api-keys">🔑 API Keys</a>
+            <a href="/admin/metadata">Firmware Management</a>
+            <a href="/admin/api-keys">API Keys</a>
         </div>
         
         <div class="content">
@@ -236,12 +236,12 @@
             {% endif %}
             
             <div class="warning">
-                <strong>⚠️ Security Notice:</strong>
+                <strong>Security Notice:</strong>
                 API keys provide full access to the OTA server. Store them securely and never share them in public repositories or logs.
             </div>
             
             <div class="section">
-                <h2>🔑 Current API Keys</h2>
+                <h2>Current API Keys</h2>
                 {% if api_keys %}
                 <div class="table-container">
                     <table>
@@ -263,7 +263,7 @@
                                     <form method="post" action="/admin/api-keys/delete" style="display: inline;">
                                         <input type="hidden" name="key_name" value="{{ key_name }}">
                                         <button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure you want to delete this API key? This cannot be undone.')">
-                                            🗑️ Delete
+                                            Delete
                                         </button>
                                     </form>
                                 </td>
@@ -274,7 +274,6 @@
                 </div>
                 {% else %}
                 <div class="empty-state">
-                    <div style="font-size: 4em; margin-bottom: 20px;">🔑</div>
                     <h3>No API Keys</h3>
                     <p>Generate your first API key below to start using the OTA API.</p>
                 </div>
@@ -282,24 +281,24 @@
             </div>
             
             <div class="section">
-                <h2>➕ Generate New API Key</h2>
+                <h2>Generate New API Key</h2>
                 <div class="form-container">
                     <form method="post" action="/admin/api-keys/generate">
                         <div class="form-group">
-                            <label for="key_name">🏷️ Key Name</label>
+                            <label for="key_name">Key Name</label>
                             <input type="text" id="key_name" name="key_name" placeholder="e.g., production-device, test-client" required>
                             <small style="color: #666; font-size: 0.9em;">Choose a descriptive name to identify this API key</small>
                         </div>
                         
                         <div style="text-align: center; margin-top: 20px;">
-                            <button type="submit" class="btn">🔐 Generate API Key</button>
+                            <button type="submit" class="btn">Generate API Key</button>
                         </div>
                     </form>
                 </div>
             </div>
             
             <div class="section">
-                <h2>📖 How to Use API Keys</h2>
+                <h2>How to Use API Keys</h2>
                 <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; border-left: 5px solid #667eea;">
                     <h4>Include the API key in your requests:</h4>
                     <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; margin: 10px 0; overflow-x: auto;"><code># Using curl

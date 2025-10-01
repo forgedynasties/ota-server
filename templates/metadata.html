@@ -9,11 +9,8 @@
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-        }                <div class="empty-state">
-                    <div style="font-size: 4em; margin-bottom: 20px;">📦</div>
-                    <h3>No Firmware Entries Yet</h3>
-                    <p>Add your first firmware entry below to get started.</p>
-                </div>     
+        }
+        
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #f5f7fa;
@@ -264,7 +261,7 @@
             {% if message %}
             <div class="message-container">
                 <div class="success-message">
-                    ✅ {{ message }}
+                    {{ message }}
                 </div>
             </div>
             {% endif %}
@@ -407,7 +404,7 @@
                     warning.id = 'duplicate-warning';
                     warning.className = 'error-message';
                     warning.style.marginTop = '10px';
-                    warning.innerHTML = '⚠️ Warning: Build ID "' + buildId + '" already exists and will be overwritten!';
+                    warning.innerHTML = 'Warning: Build ID "' + buildId + '" already exists and will be overwritten!';
                     document.getElementById('build_id').parentNode.appendChild(warning);
                 }
             } else {
