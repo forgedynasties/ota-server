@@ -2,6 +2,7 @@ import json
 import hashlib
 import os
 import secrets
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -13,18 +14,28 @@ from pydantic import BaseModel
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
-import sqlite3
-from contextlib import contextmanager
+
+# ====== Logging Configuration ======
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('ota_server.log')
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # ====== Config ======
 PACKAGES_DIR = Path("packages")
+TRASH_DIR = Path("trash")
 METADATA_FILE = Path("metadata.json")
 PRIVATE_KEY_FILE = Path("keys/private.pem")
-DB_FILE = Path("ota_server.db")
 API_KEYS_FILE = Path("api_keys.json")
 
 # Create directories if they don't exist
 PACKAGES_DIR.mkdir(exist_ok=True)
+TRASH_DIR.mkdir(exist_ok=True)
 Path("keys").mkdir(exist_ok=True)
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -33,6 +44,34 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # ====== FastAPI App ======
 app = FastAPI(title="OTA Update Server")
 security = HTTPBearer()
+
+# ====== Request Logging Middleware ======
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = datetime.now()
+    
+    # Log incoming request
+    body = None
+    if request.method in ["POST", "PUT", "PATCH"]:
+        body = await request.body()
+        logger.info(f"📥 {request.method} {request.url.path} - Body: {body.decode('utf-8') if body else 'None'}")
+    else:
+        logger.info(f"📥 {request.method} {request.url.path} - Query: {dict(request.query_params)}")
+    
+    # Log headers (excluding sensitive auth data)
+    headers = dict(request.headers)
+    if 'authorization' in headers:
+        headers['authorization'] = headers['authorization'][:20] + '...' if len(headers['authorization']) > 20 else headers['authorization']
+    logger.info(f"📋 Headers: {headers}")
+    
+    # Process request
+    response = await call_next(request)
+    
+    # Log response
+    duration = (datetime.now() - start_time).total_seconds() * 1000
+    logger.info(f"📤 Response: {response.status_code} - Duration: {duration:.2f}ms")
+    
+    return response
 
 # ====== Authentication ======
 def load_api_keys() -> Dict[str, str]:
@@ -65,162 +104,63 @@ def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-# ====== Database Setup ======
-@contextmanager
-def get_db_connection():
-    """Get database connection with context manager"""
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-def init_database():
-    """Initialize SQLite database with tables"""
-    with get_db_connection() as conn:
-        # Builds table
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS builds (
-                build_id TEXT PRIMARY KEY,
-                version TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # OTA Packages table
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS ota_packages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                build_id TEXT NOT NULL UNIQUE,
-                timestamp TEXT NOT NULL,
-                package_url TEXT NOT NULL,
-                checksum TEXT NOT NULL,
-                patch_notes TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (build_id) REFERENCES builds (build_id) ON DELETE CASCADE
-            )
-        ''')
-        
-        # API Keys table (for management)
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS api_keys (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key_name TEXT NOT NULL UNIQUE,
-                key_value TEXT NOT NULL UNIQUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_used TIMESTAMP,
-                is_active BOOLEAN DEFAULT 1
-            )
-        ''')
-        
-        conn.commit()
-
-# Initialize database on startup
-init_database()
-
-# ====== Database Operations ======
-def create_build_in_db(build_id: str, version: str, timestamp: str, package_url: str, checksum: str, patch_notes: str):
-    """Create a new build and OTA package in database"""
-    with get_db_connection() as conn:
-        # Insert build
-        conn.execute(
-            "INSERT OR REPLACE INTO builds (build_id, version) VALUES (?, ?)",
-            (build_id, version)
-        )
-        
-        # Insert OTA package
-        conn.execute(
-            "INSERT OR REPLACE INTO ota_packages (build_id, timestamp, package_url, checksum, patch_notes) VALUES (?, ?, ?, ?, ?)",
-            (build_id, timestamp, package_url, checksum, patch_notes)
-        )
-        
-        conn.commit()
-
-def get_all_builds_from_db() -> Dict[str, Dict]:
-    """Get all builds with their OTA packages from database"""
-    with get_db_connection() as conn:
-        cursor = conn.execute('''
-            SELECT b.build_id, b.version, p.timestamp, p.package_url, p.checksum, p.patch_notes
-            FROM builds b
-            LEFT JOIN ota_packages p ON b.build_id = p.build_id
-            ORDER BY b.build_id
-        ''')
-        
-        builds = {}
-        for row in cursor.fetchall():
-            builds[row['build_id']] = {
-                'version': row['version'],
-                'timestamp': row['timestamp'],
-                'package_url': row['package_url'],
-                'checksum': row['checksum'],
-                'patch_notes': row['patch_notes']
-            }
-        
-        return builds
-
-def get_build_from_db(build_id: str) -> Optional[Dict]:
-    """Get specific build from database"""
-    with get_db_connection() as conn:
-        cursor = conn.execute('''
-            SELECT b.build_id, b.version, p.timestamp, p.package_url, p.checksum, p.patch_notes
-            FROM builds b
-            LEFT JOIN ota_packages p ON b.build_id = p.build_id
-            WHERE b.build_id = ?
-        ''', (build_id,))
-        
-        row = cursor.fetchone()
-        if row:
-            return {
-                'version': row['version'],
-                'timestamp': row['timestamp'],
-                'package_url': row['package_url'],
-                'checksum': row['checksum'],
-                'patch_notes': row['patch_notes']
-            }
-        return None
-
-def delete_build_from_db(build_id: str):
-    """Delete build and associated OTA package from database"""
-    with get_db_connection() as conn:
-        conn.execute("DELETE FROM builds WHERE build_id = ?", (build_id,))
-        conn.commit()
-
-def migrate_json_to_db():
-    """Migrate data from metadata.json to SQLite database"""
+# ====== JSON File Operations ======
+def load_metadata() -> dict:
+    """Load metadata from JSON file"""
     if METADATA_FILE.exists():
-        print("Migrating metadata.json to database...")
-        metadata = json.loads(METADATA_FILE.read_text())
-        
-        for build_id, entry in metadata.items():
-            version = entry.get('version', '1.0.0')
-            timestamp = entry.get('timestamp', datetime.now().isoformat())
-            package_url = entry.get('package_url', f'/packages/ota-{build_id}.zip')
-            checksum = entry.get('checksum', '')
-            patch_notes = entry.get('patch_notes', f'Update to version {version}')
-            
-            # Calculate checksum if missing
-            if not checksum:
-                try:
-                    checksum = calculate_checksum(build_id)
-                except:
-                    checksum = 'unknown'
-            
-            create_build_in_db(build_id, version, timestamp, package_url, checksum, patch_notes)
-        
-        print(f"Migrated {len(metadata)} builds to database")
+        try:
+            return json.loads(METADATA_FILE.read_text())
+        except (json.JSONDecodeError, Exception):
+            return {}
+    return {}
 
-# Auto-migrate on startup if database is empty
-def check_and_migrate():
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT COUNT(*) FROM builds")
-        count = cursor.fetchone()[0]
-        
-        if count == 0 and METADATA_FILE.exists():
-            migrate_json_to_db()
+def save_metadata(data: dict):
+    """Save metadata to JSON file"""
+    METADATA_FILE.write_text(json.dumps(data, indent=2))
 
-check_and_migrate()
+def move_to_trash(build_id: str):
+    """Move package file to trash directory instead of deleting"""
+    # Standard package file
+    package_file = PACKAGES_DIR / f"ota-{build_id}.zip" 
+    if package_file.exists():
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        trash_file = TRASH_DIR / f"ota-{build_id}_{timestamp}.zip"
+        package_file.rename(trash_file)
+        logger.info(f"📁 Moved {package_file.name} to trash: {trash_file.name}")
+        return str(trash_file)
+    return None
+
+def create_build_in_metadata(build_id: str, version: str, package_url: str, checksum: str, patch_notes: str):
+    """Create a new build entry in metadata"""
+    metadata = load_metadata()
+    metadata[build_id] = {
+        'version': version,
+        'package_url': package_url,
+        'checksum': checksum,
+        'patch_notes': patch_notes,
+        'filename': f"ota-{build_id}.zip"
+    }
+    save_metadata(metadata)
+
+def get_all_builds() -> Dict[str, Dict]:
+    """Get all builds from metadata file"""
+    return load_metadata()
+
+def get_build(build_id: str) -> Optional[Dict]:
+    """Get specific build from metadata"""
+    metadata = load_metadata()
+    return metadata.get(build_id)
+
+def delete_build_from_metadata(build_id: str):
+    """Delete build from metadata and move package to trash"""
+    metadata = load_metadata()
+    if build_id in metadata:
+        # Move package file to trash
+        move_to_trash(build_id)
+        # Remove from metadata
+        del metadata[build_id]
+        save_metadata(metadata)
+        logger.info(f"🗑️ Deleted build {build_id} and moved package to trash")
 
 # ====== Load private key ======
 with open(PRIVATE_KEY_FILE, "rb") as f:
@@ -354,57 +294,40 @@ def load_metadata() -> dict:
     return {}
 
 def find_next_build(metadata: dict, current_build: str) -> str:
-    """Find the next build ID in sequence based on package file creation timestamp.
-    For files with the same timestamp, uses build ID as tiebreaker."""
+    """Find the next build ID in sequence based on JSON file ordering.
+    Returns the build that comes after the current build in the metadata file."""
     
-    # Get current build's package file (using standardized naming)
-    current_entry = metadata.get(current_build)
-    if not current_entry:
+    # Get current build's entry
+    if current_build not in metadata:
         return None
     
-    current_filename = f"ota-{current_build}.zip"
-    current_file_path = PACKAGES_DIR / current_filename
-    if not current_file_path.exists():
-        return None
+    # Convert to list to preserve order
+    build_list = list(metadata.keys())
     
     try:
-        current_timestamp = os.path.getctime(current_file_path)
-    except OSError:
-        return None
-    
-    # Find all builds with package files created after current build's file
-    next_builds = []
-    for build_id, entry in metadata.items():
-        filename = f"ota-{build_id}.zip"
-        file_path = PACKAGES_DIR / filename
-        if not file_path.exists():
-            continue
-        
-        try:
-            file_timestamp = os.path.getctime(file_path)
+        current_index = build_list.index(current_build)
+        # Return the next build if it exists
+        if current_index + 1 < len(build_list):
+            next_build_id = build_list[current_index + 1]
             
-            # Include builds with later creation timestamps
-            if file_timestamp > current_timestamp:
-                next_builds.append((file_timestamp, build_id))
-            # Also include builds with same timestamp but lexicographically higher build ID
-            elif file_timestamp == current_timestamp and build_id > current_build:
-                next_builds.append((file_timestamp, build_id))
-        except OSError:
-            continue
-    
-    # Sort by creation timestamp first, then by build ID for consistent ordering
-    if next_builds:
-        next_builds.sort(key=lambda x: (x[0], x[1]))
-        return next_builds[0][1]
-    
-    return None  # No next build found
+            # Verify the package file exists
+            filename = f"ota-{next_build_id}.zip"
+            file_path = PACKAGES_DIR / filename
+            if file_path.exists():
+                return next_build_id
+        
+        # If no next build found or file doesn't exist, return None
+        return None
+        
+    except ValueError:
+        return None
 
 # ====== New API Endpoints ======
 
 @app.get("/api/builds", response_model=Dict[str, Build])
-def get_all_builds(api_key: str = Depends(verify_api_key)):
+def get_all_builds_api(api_key: str = Depends(verify_api_key)):
     """Get all builds with their OTA package information."""
-    builds_data = get_all_builds_from_db()
+    builds_data = get_all_builds()
     builds = {}
     
     for build_id, metadata_entry in builds_data.items():
@@ -413,9 +336,9 @@ def get_all_builds(api_key: str = Depends(verify_api_key)):
     return builds
 
 @app.get("/api/builds/{build_id}", response_model=Build)
-def get_build(build_id: str, api_key: str = Depends(verify_api_key)):
+def get_build_api(build_id: str, api_key: str = Depends(verify_api_key)):
     """Get specific build information."""
-    build_data = get_build_from_db(build_id)
+    build_data = get_build(build_id)
     
     if not build_data:
         raise HTTPException(status_code=404, detail="Build not found")
@@ -428,16 +351,23 @@ def check_for_update(request: UpdateCheckRequest, api_key: str = Depends(verify_
     Device sends build_id to check for updates.
     Returns update package info if available, otherwise indicates up-to-date.
     """
+    logger.info(f"🔍 Checking update for build_id: '{request.build_id}'")
+    
     # Check if current build exists in database
-    current_build_data = get_build_from_db(request.build_id)
+    current_build_data = get_build(request.build_id)
+    logger.info(f"📊 Current build data: {current_build_data}")
+    
     if not current_build_data:
+        all_builds = get_all_builds()
+        available_builds = list(all_builds.keys())
+        logger.warning(f"❌ Build ID '{request.build_id}' not found! Available builds: {available_builds}")
         return UpdateResponse(
             status="error",
             message="Build ID not found"
         )
 
     # Find the next build in sequence
-    all_builds = get_all_builds_from_db()
+    all_builds = get_all_builds()
     next_build = find_next_build(all_builds, request.build_id)
     
     if not next_build:
@@ -475,10 +405,17 @@ def validate_package_checksum(request: ChecksumValidationRequest, api_key: str =
     """
     build_id = request.build_id
     provided_checksum = request.checksum
+    
+    logger.info(f"🔐 Validating checksum for build_id: '{build_id}', provided_checksum: '{provided_checksum}'")
 
     # Check if build exists
-    build_data = get_build_from_db(build_id)
+    build_data = get_build(build_id)
+    logger.info(f"📊 Build data for checksum validation: {build_data}")
+    
     if not build_data:
+        all_builds = get_all_builds()
+        available_builds = list(all_builds.keys())
+        logger.warning(f"❌ Build ID '{build_id}' not found for checksum validation! Available builds: {available_builds}")
         return ChecksumValidationResponse(
             status="error",
             is_valid=False,
@@ -590,7 +527,7 @@ def save_metadata(data):
 @app.get("/metadata")
 def get_metadata_legacy():
     """Legacy endpoint - returns data in old JSON format"""
-    builds_data = get_all_builds_from_db()
+    builds_data = get_all_builds()
     # Convert to old format for backwards compatibility
     legacy_format = {}
     for build_id, data in builds_data.items():
@@ -598,19 +535,19 @@ def get_metadata_legacy():
             legacy_format[build_id] = {
                 "version": data.get("version"),
                 "filename": f"ota-{build_id}.zip",
-                "release_date": data.get("timestamp", "").split("T")[0] if data.get("timestamp") else ""
+                "release_date": ""
             }
     return legacy_format
 
 @app.get("/update")
 def get_update_legacy(build_id: str):
     """Legacy endpoint - use /api/builds/{build_id} instead"""
-    build_data = get_build_from_db(build_id)
+    build_data = get_build(build_id)
     if build_data:
         return {
             "version": build_data.get("version"),
             "filename": f"ota-{build_id}.zip",
-            "release_date": build_data.get("timestamp", "").split("T")[0] if build_data.get("timestamp") else ""
+            "release_date": ""
         }
     return {"error": "No update found"}
 
@@ -618,13 +555,12 @@ def get_update_legacy(build_id: str):
 # --- Admin Web UI ---
 @app.get("/admin/metadata", response_class=HTMLResponse)
 def admin_metadata(request: Request, message: str = None):
-    builds_data = get_all_builds_from_db()
+    builds_data = get_all_builds()
     
-    # Add creation timestamps and filenames to builds data for display
+    # Use the JSON file order (no sorting needed)
     enhanced_metadata = {}
     for build_id, entry in builds_data.items():
         enhanced_entry = entry.copy() if entry else {}
-        enhanced_entry['creation_time'] = enhanced_entry.get('timestamp', get_file_creation_time(build_id))
         enhanced_entry['filename'] = f"ota-{build_id}.zip"
         enhanced_metadata[build_id] = enhanced_entry
     
@@ -644,7 +580,9 @@ async def add_metadata(
     metadata = load_metadata()
     
     # Check if build ID already exists
-    existing_build = get_build_from_db(build_id)
+    existing_build = get_build(build_id)
+    action = "updated" if existing_build else "added"
+    
     if existing_build and not overwrite:
         existing_version = existing_build.get("version", "unknown")
         return HTMLResponse(
@@ -719,28 +657,24 @@ async def add_metadata(
         if not file_path.exists():
             raise HTTPException(status_code=400, detail=f"No file uploaded and {standard_filename} does not exist in packages directory")
     
-        # Calculate checksum and timestamp for the package
-        try:
-            checksum = calculate_checksum(build_id)
-            timestamp = datetime.now().isoformat()
-            # Use actual filename that was uploaded
-            actual_file = find_package_file(build_id)
-            package_url = f"/packages/{actual_file.name if actual_file else standard_filename}"
-            
-            # Add or update build in database
-            existing_build = get_build_from_db(build_id)
-            action = "updated" if existing_build else "added"
-            
-            create_build_in_db(
-                build_id=build_id,
-                version=version,
-                timestamp=timestamp,
-                package_url=package_url,
-                checksum=checksum,
-                patch_notes=patch_notes or f"Update to version {version}"
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to process package: {str(e)}")
+    # Calculate checksum for the package
+    try:
+        checksum = calculate_checksum(build_id)
+        
+        # Use actual filename that was uploaded
+        actual_file = find_package_file(build_id)
+        package_url = f"/packages/{actual_file.name if actual_file else standard_filename}"
+        
+        # Add or update build in metadata
+        create_build_in_metadata(
+            build_id=build_id,
+            version=version,
+            package_url=package_url,
+            checksum=checksum,
+            patch_notes=patch_notes or f"Update to version {version}"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process package: {str(e)}")
     
     # Redirect with success message
     return RedirectResponse(url=f"/admin/metadata?message=Build {build_id} {action} successfully", status_code=303)
@@ -748,7 +682,7 @@ async def add_metadata(
 
 @app.post("/admin/metadata/delete")
 def delete_metadata(build_id: str = Form(...)):
-    delete_build_from_db(build_id)
+    delete_build_from_metadata(build_id)
     return RedirectResponse(url="/admin/metadata", status_code=303)
 
 # ====== API Key Management ======

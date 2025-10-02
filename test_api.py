@@ -10,7 +10,7 @@ import json
 # Server configuration
 BASE_URL = "http://localhost:8000"
 # Replace with your actual API key generated from /admin/api-keys
-API_KEY = "nTJIxqVrt5-oom8P_EQ-loHgJVCP4Ol_TA6hMpWvjGc"
+API_KEY = "YOUR_API_KEY_HERE"
 
 # Headers for authenticated requests
 HEADERS = {
@@ -22,7 +22,7 @@ def test_authentication():
     """Test API key authentication"""
     print("=== Testing Authentication ===")
     
-    if API_KEY == "YOUR_API_KEY_HERE":
+    if API_KEY == "-":
         print("⚠️  Please set your API key in the script!")
         print("1. Start the server: python main.py")
         print("2. Go to http://localhost:8000/admin/api-keys")

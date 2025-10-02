@@ -249,7 +249,7 @@
     <div class="container" data-existing-builds="{{ metadata.keys() | list | join(',') }}">
         <div class="header">
             <h1>OTA Metadata Management</h1>
-            <p>Manage firmware updates with release date sequencing</p>
+            <p>Manage firmware updates with JSON file ordering</p>
         </div>
         
         <div style="background: #5a6fd8; padding: 10px 0; text-align: center;">
@@ -273,9 +273,9 @@
                     <table>
                         <thead>
                             <tr>
+                                <th>#</th>
                                 <th>Build ID</th>
                                 <th>Version</th>
-                                <th>Timestamp</th>
                                 <th>Download URL</th>
                                 <th>Checksum</th>
                                 <th>Patch Notes</th>
@@ -285,9 +285,9 @@
                         <tbody>
                             {% for build_id, entry in metadata.items() %}
                             <tr>
+                                <td><strong style="color: #667eea;">{{ loop.index }}</strong></td>
                                 <td><strong>{{ build_id }}</strong></td>
                                 <td><span class="badge">{{ entry.version }}</span></td>
-                                <td>{{ entry.timestamp or entry.creation_time }}</td>
                                 <td>
                                     <a href="{{ entry.package_url or '/packages/ota-' + build_id + '.zip' }}" style="color: #667eea; text-decoration: none;" title="Download package">
                                         {{ entry.package_url or '/packages/ota-' + build_id + '.zip' }}
@@ -321,18 +321,23 @@
 
             <div class="section">
                 <h2>Add New Firmware Entry</h2>
+                <div style="background: #e3f2fd; border: 1px solid #90caf9; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h4 style="margin: 0 0 10px 0; color: #1976d2;">ℹ️ Update Ordering</h4>
+                    <p style="margin: 0; color: #333;">Builds are ordered as they appear in the JSON file. When a device requests an update, it will receive the next build in the list. The order follows the sequence you see below.</p>
+                </div>
                 <div class="form-container">
                     <form method="post" action="/admin/metadata/add" enctype="multipart/form-data">
                         <div class="form-grid">
                             <div class="form-group">
                                 <label for="build_id">Build ID</label>
-                                <input type="text" id="build_id" name="build_id" placeholder="e.g., build-1004" required>
+                                <input type="text" id="build_id" name="build_id" placeholder="e.g., any-build-name" required>
                                 <small style="color: #666; font-size: 0.9em;">File will be saved as: ota-{build_id}.zip</small>
                             </div>
                             <div class="form-group">
                                 <label for="version">Version</label>
                                 <input type="text" id="version" name="version" placeholder="e.g., 1.4.0" required>
                             </div>
+
                             <div class="form-group" style="grid-column: 1 / -1;">
                                 <label for="patch_notes">Patch Notes</label>
                                 <textarea id="patch_notes" name="patch_notes" rows="3" placeholder="Enter release notes or changes in this update..."></textarea>
@@ -424,11 +429,7 @@
             const buildId = document.getElementById('build_id').value;
             const uploadFile = document.getElementById('upload_file').files[0];
             
-            if (!buildId.startsWith('build-')) {
-                alert('Build ID should start with "build-" (e.g., build-1004)');
-                e.preventDefault();
-                return;
-            }
+
             
             // Warning for duplicate build IDs
             if (existingBuildIds.includes(buildId)) {
