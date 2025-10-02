@@ -54,22 +54,22 @@ async def log_requests(request: Request, call_next):
     body = None
     if request.method in ["POST", "PUT", "PATCH"]:
         body = await request.body()
-        logger.info(f"📥 {request.method} {request.url.path} - Body: {body.decode('utf-8') if body else 'None'}")
+        logger.info(f"REQUEST {request.method} {request.url.path} - Body: {body.decode('utf-8') if body else 'None'}")
     else:
-        logger.info(f"📥 {request.method} {request.url.path} - Query: {dict(request.query_params)}")
+        logger.info(f"REQUEST {request.method} {request.url.path} - Query: {dict(request.query_params)}")
     
     # Log headers (excluding sensitive auth data)
     headers = dict(request.headers)
     if 'authorization' in headers:
         headers['authorization'] = headers['authorization'][:20] + '...' if len(headers['authorization']) > 20 else headers['authorization']
-    logger.info(f"📋 Headers: {headers}")
+    logger.info(f"Headers: {headers}")
     
     # Process request
     response = await call_next(request)
     
     # Log response
     duration = (datetime.now() - start_time).total_seconds() * 1000
-    logger.info(f"📤 Response: {response.status_code} - Duration: {duration:.2f}ms")
+    logger.info(f"RESPONSE: {response.status_code} - Duration: {duration:.2f}ms")
     
     return response
 
@@ -126,7 +126,7 @@ def move_to_trash(build_id: str):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         trash_file = TRASH_DIR / f"ota-{build_id}_{timestamp}.zip"
         package_file.rename(trash_file)
-        logger.info(f"📁 Moved {package_file.name} to trash: {trash_file.name}")
+        logger.info(f"Moved {package_file.name} to trash: {trash_file.name}")
         return str(trash_file)
     return None
 
@@ -160,7 +160,7 @@ def delete_build_from_metadata(build_id: str):
         # Remove from metadata
         del metadata[build_id]
         save_metadata(metadata)
-        logger.info(f"🗑️ Deleted build {build_id} and moved package to trash")
+        logger.info(f"Deleted build {build_id} and moved package to trash")
 
 # ====== Load private key ======
 with open(PRIVATE_KEY_FILE, "rb") as f:
@@ -310,13 +310,24 @@ def find_next_build(metadata: dict, current_build: str) -> str:
         if current_index + 1 < len(build_list):
             next_build_id = build_list[current_index + 1]
             
-            # Verify the package file exists
-            filename = f"ota-{next_build_id}.zip"
+            # Get the package file path from metadata
+            next_build_data = metadata.get(next_build_id, {})
+            package_url = next_build_data.get('package_url', f'/packages/ota-{next_build_id}.zip')
+            
+            # Extract filename from package_url (remove /packages/ prefix)
+            if package_url.startswith('/packages/'):
+                filename = package_url[10:]  # Remove '/packages/' prefix
+            else:
+                filename = f"ota-{next_build_id}.zip"
+                
             file_path = PACKAGES_DIR / filename
-            if file_path.exists():
-                return next_build_id
+            
+            # Check if package file exists, if not, still return the build ID 
+            # (the API will handle the file not found error later)
+            logger.info(f"Next build: {next_build_id}, checking file: {file_path}")
+            return next_build_id
         
-        # If no next build found or file doesn't exist, return None
+        # If no next build found, return None (up-to-date)
         return None
         
     except ValueError:
@@ -351,16 +362,16 @@ def check_for_update(request: UpdateCheckRequest, api_key: str = Depends(verify_
     Device sends build_id to check for updates.
     Returns update package info if available, otherwise indicates up-to-date.
     """
-    logger.info(f"🔍 Checking update for build_id: '{request.build_id}'")
+    logger.info(f"Checking update for build_id: '{request.build_id}'")
     
     # Check if current build exists in database
     current_build_data = get_build(request.build_id)
-    logger.info(f"📊 Current build data: {current_build_data}")
+    logger.info(f"Current build data: {current_build_data}")
     
     if not current_build_data:
         all_builds = get_all_builds()
         available_builds = list(all_builds.keys())
-        logger.warning(f"❌ Build ID '{request.build_id}' not found! Available builds: {available_builds}")
+        logger.warning(f"Build ID '{request.build_id}' not found! Available builds: {available_builds}")
         return UpdateResponse(
             status="error",
             message="Build ID not found"
@@ -406,16 +417,16 @@ def validate_package_checksum(request: ChecksumValidationRequest, api_key: str =
     build_id = request.build_id
     provided_checksum = request.checksum
     
-    logger.info(f"🔐 Validating checksum for build_id: '{build_id}', provided_checksum: '{provided_checksum}'")
+    logger.info(f"Validating checksum for build_id: '{build_id}', provided_checksum: '{provided_checksum}'")
 
     # Check if build exists
     build_data = get_build(build_id)
-    logger.info(f"📊 Build data for checksum validation: {build_data}")
+    logger.info(f"Build data for checksum validation: {build_data}")
     
     if not build_data:
         all_builds = get_all_builds()
         available_builds = list(all_builds.keys())
-        logger.warning(f"❌ Build ID '{build_id}' not found for checksum validation! Available builds: {available_builds}")
+        logger.warning(f"Build ID '{build_id}' not found for checksum validation! Available builds: {available_builds}")
         return ChecksumValidationResponse(
             status="error",
             is_valid=False,
