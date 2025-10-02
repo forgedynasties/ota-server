@@ -3,13 +3,15 @@ import hashlib
 import os
 import secrets
 import logging
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile, File, Depends, status
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -44,6 +46,40 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app = FastAPI(title="OTA Update Server")
 security = HTTPBearer()
 
+# ====== Static File Serving ======
+# Mount static files BEFORE other routes to bypass FastAPI streaming issues
+# This serves files directly via Starlette's StaticFiles which uses sendfile() when possible
+app.mount("/static", StaticFiles(directory="."), name="static")
+
+# ====== Exception Handlers ======
+@app.exception_handler(asyncio.CancelledError)
+async def cancelled_error_handler(request: Request, exc: asyncio.CancelledError):
+    """Handle client disconnections gracefully"""
+    logger.info(f"Client disconnected from {request.method} {request.url.path}")
+    # Return nothing - connection is already closed
+    return None
+
+@app.exception_handler(AssertionError)
+async def assertion_error_handler(request: Request, exc: AssertionError):
+    """Handle asyncio assertion errors from empty data buffers"""
+    error_msg = str(exc)
+    if "Data should not be empty" in error_msg or "_buffer" in error_msg:
+        logger.warning(f"Asyncio buffer assertion error for {request.method} {request.url.path}: {error_msg}")
+        logger.warning("This should not happen with our safe streaming - investigating...")
+        return None
+    # Re-raise other assertion errors
+    raise exc
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Catch any other streaming-related exceptions"""
+    error_msg = str(exc)
+    if "_write_send" in error_msg or "_buffer" in error_msg or "asyncio" in error_msg.lower():
+        logger.error(f"Asyncio transport error for {request.method} {request.url.path}: {error_msg}")
+        return None
+    # Re-raise other exceptions for normal FastAPI handling
+    raise exc
+
 # ====== Request Logging Middleware ======
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -64,13 +100,19 @@ async def log_requests(request: Request, call_next):
     logger.info(f"Headers: {headers}")
     
     # Process request
-    response = await call_next(request)
-    
-    # Log response
-    duration = (datetime.now() - start_time).total_seconds() * 1000
-    logger.info(f"RESPONSE: {response.status_code} - Duration: {duration:.2f}ms")
-    
-    return response
+    try:
+        response = await call_next(request)
+        
+        # Log response
+        duration = (datetime.now() - start_time).total_seconds() * 1000
+        logger.info(f"RESPONSE: {response.status_code} - Duration: {duration:.2f}ms")
+        
+        return response
+    except asyncio.CancelledError:
+        # Client disconnected
+        duration = (datetime.now() - start_time).total_seconds() * 1000
+        logger.info(f"CLIENT DISCONNECTED: {request.method} {request.url.path} - Duration: {duration:.2f}ms")
+        raise  # Re-raise to let FastAPI handle it
 
 # ====== Authentication ======
 def load_api_keys() -> Dict[str, str]:
@@ -515,95 +557,35 @@ def get_checksum(build_id: str):
 
 @app.get("/packages/{filename}")
 def get_package(filename: str, request: Request):
+    """
+    PYTHON 3.13 FIX: Redirect to static file server
+    Completely bypasses FastAPI streaming to avoid asyncio transport issues
+    """
     file_path = PACKAGES_DIR / filename
     if not file_path.exists():
         logger.error(f"Package file not found: {filename}")
         raise HTTPException(status_code=404, detail="Package not found")
     
-    # Get file size for logging and headers
+    # Log the request but redirect to static server
     file_size = file_path.stat().st_size
-    logger.info(f"Starting download for {filename} (size: {file_size} bytes, {file_size/1024/1024:.1f} MB)")
+    logger.info(f"Package download request for {filename} (size: {file_size} bytes, {file_size/1024/1024:.1f} MB)")
     
-    # Handle Range requests for resumable downloads
-    range_header = request.headers.get('Range')
-    start = 0
-    end = file_size - 1
+    # Try dedicated static server first, fallback to same-port static
+    # Option 1: Dedicated static server (most reliable)
+    static_url = f"http://10.32.1.11:8001/packages/{filename}"
+    logger.info(f"Redirecting {filename} to dedicated static server: {static_url}")
     
-    if range_header:
-        try:
-            # Parse Range header: "bytes=start-end" 
-            range_match = range_header.replace('bytes=', '').split('-')
-            if range_match[0]:
-                start = int(range_match[0])
-            if range_match[1]:
-                end = int(range_match[1])
-            
-            # Ensure end doesn't exceed file size
-            end = min(end, file_size - 1)
-            
-            logger.info(f"Range request for {filename}: bytes {start}-{end}/{file_size}")
-        except:
-            # Invalid range header, ignore it
-            logger.warning(f"Invalid Range header for {filename}: {range_header}")
-            range_header = None
-    
-    content_length = end - start + 1
-    
-    # Python 3.13 AsyncIO workaround - use synchronous file reading with StreamingResponse
-    def file_generator():
-        chunk_size = 65536  # 64KB chunks for better performance with large files
-        bytes_sent = 0
-        
-        try:
-            with open(file_path, "rb") as file:
-                # Seek to start position for range requests
-                if start > 0:
-                    file.seek(start)
-                
-                remaining = content_length
-                
-                while remaining > 0:
-                    # Read chunk size or remaining bytes, whichever is smaller
-                    chunk_to_read = min(chunk_size, remaining)
-                    chunk = file.read(chunk_to_read)
-                    
-                    if not chunk:
-                        break
-                        
-                    bytes_sent += len(chunk)
-                    remaining -= len(chunk)
-                    yield chunk
-                    
-                    # Log progress every 10MB for large files
-                    if bytes_sent % (10 * 1024 * 1024) == 0:
-                        total_progress = ((start + bytes_sent) / file_size) * 100 if file_size > 0 else 0
-                        logger.info(f"Download progress for {filename}: {total_progress:.1f}% ({start + bytes_sent}/{file_size} bytes)")
-            
-            logger.info(f"Download completed for {filename}: {bytes_sent} bytes sent (range: {start}-{end})")
-            
-        except Exception as e:
-            logger.error(f"Error during file download for {filename}: {str(e)}")
-            raise
-    
-    # Set appropriate headers based on whether this is a range request
-    headers = {
-        "Content-Disposition": f"attachment; filename={filename}",
-        "Accept-Ranges": "bytes",
-        "Cache-Control": "no-cache",
-        "Content-Length": str(content_length)
-    }
-    
-    status_code = 200
-    if range_header:
-        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-        status_code = 206  # Partial Content
-    
-    return StreamingResponse(
-        file_generator(), 
-        status_code=status_code,
-        media_type="application/octet-stream",
-        headers=headers
-    )
+    # Test if static server is available
+    import requests
+    try:
+        test_response = requests.head("http://localhost:8001/", timeout=1)
+        # Static server is available
+        return RedirectResponse(url=static_url, status_code=302)
+    except:
+        # Fallback to same-port static files
+        logger.info("Dedicated static server not available, using same-port static files")
+        fallback_url = f"/static/packages/{filename}"
+        return RedirectResponse(url=fallback_url, status_code=302)
 
 # Load metadata.json
 def load_metadata():
