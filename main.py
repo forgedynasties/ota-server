@@ -514,31 +514,95 @@ def get_checksum(build_id: str):
     return {"build_id": build_id, "filename": filename, "checksum": checksum, "signature": signed_checksum}
 
 @app.get("/packages/{filename}")
-def get_package(filename: str):
+def get_package(filename: str, request: Request):
     file_path = PACKAGES_DIR / filename
     if not file_path.exists():
+        logger.error(f"Package file not found: {filename}")
         raise HTTPException(status_code=404, detail="Package not found")
+    
+    # Get file size for logging and headers
+    file_size = file_path.stat().st_size
+    logger.info(f"Starting download for {filename} (size: {file_size} bytes, {file_size/1024/1024:.1f} MB)")
+    
+    # Handle Range requests for resumable downloads
+    range_header = request.headers.get('Range')
+    start = 0
+    end = file_size - 1
+    
+    if range_header:
+        try:
+            # Parse Range header: "bytes=start-end" 
+            range_match = range_header.replace('bytes=', '').split('-')
+            if range_match[0]:
+                start = int(range_match[0])
+            if range_match[1]:
+                end = int(range_match[1])
+            
+            # Ensure end doesn't exceed file size
+            end = min(end, file_size - 1)
+            
+            logger.info(f"Range request for {filename}: bytes {start}-{end}/{file_size}")
+        except:
+            # Invalid range header, ignore it
+            logger.warning(f"Invalid Range header for {filename}: {range_header}")
+            range_header = None
+    
+    content_length = end - start + 1
     
     # Python 3.13 AsyncIO workaround - use synchronous file reading with StreamingResponse
     def file_generator():
-        chunk_size = 8192  # 8KB chunks
-        with open(file_path, "rb") as file:
-            while True:
-                chunk = file.read(chunk_size)
-                if not chunk:
-                    break
-                yield chunk
+        chunk_size = 65536  # 64KB chunks for better performance with large files
+        bytes_sent = 0
+        
+        try:
+            with open(file_path, "rb") as file:
+                # Seek to start position for range requests
+                if start > 0:
+                    file.seek(start)
+                
+                remaining = content_length
+                
+                while remaining > 0:
+                    # Read chunk size or remaining bytes, whichever is smaller
+                    chunk_to_read = min(chunk_size, remaining)
+                    chunk = file.read(chunk_to_read)
+                    
+                    if not chunk:
+                        break
+                        
+                    bytes_sent += len(chunk)
+                    remaining -= len(chunk)
+                    yield chunk
+                    
+                    # Log progress every 10MB for large files
+                    if bytes_sent % (10 * 1024 * 1024) == 0:
+                        total_progress = ((start + bytes_sent) / file_size) * 100 if file_size > 0 else 0
+                        logger.info(f"Download progress for {filename}: {total_progress:.1f}% ({start + bytes_sent}/{file_size} bytes)")
+            
+            logger.info(f"Download completed for {filename}: {bytes_sent} bytes sent (range: {start}-{end})")
+            
+        except Exception as e:
+            logger.error(f"Error during file download for {filename}: {str(e)}")
+            raise
     
-    # Get file size for Content-Length header
-    file_size = file_path.stat().st_size
+    # Set appropriate headers based on whether this is a range request
+    headers = {
+        "Content-Disposition": f"attachment; filename={filename}",
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-cache",
+        "Content-Length": str(content_length)
+    }
+    
+    status_code = 200
+    if range_header:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        status_code = 206  # Partial Content
     
     return StreamingResponse(
         file_generator(), 
+        status_code=status_code,
         media_type="application/octet-stream",
-        headers={
-            "Content-Disposition": f"attachment; filename={filename}",
-            "Content-Length": str(file_size)
-        }
+        headers=headers
     )
 
 # Load metadata.json
