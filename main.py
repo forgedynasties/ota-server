@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile, File, Depends, status
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -518,7 +518,28 @@ def get_package(filename: str):
     file_path = PACKAGES_DIR / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Package not found")
-    return FileResponse(file_path)
+    
+    # Python 3.13 AsyncIO workaround - use synchronous file reading with StreamingResponse
+    def file_generator():
+        chunk_size = 8192  # 8KB chunks
+        with open(file_path, "rb") as file:
+            while True:
+                chunk = file.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+    
+    # Get file size for Content-Length header
+    file_size = file_path.stat().st_size
+    
+    return StreamingResponse(
+        file_generator(), 
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Length": str(file_size)
+        }
+    )
 
 # Load metadata.json
 def load_metadata():
